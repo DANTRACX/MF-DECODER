@@ -1,0 +1,46 @@
+/*======================================================================*
+ * PROJECT:         MF-DECODER
+ * MODUL:           DRIVER
+ * DEVELOPED BY:    Christoph Klie
+ * FILENAME:        TIMER1_DRIVER.c
+ *
+ * DESCRIPTION:
+ *      THIS MODULE REPRESENTS A DRIVER FOR THE 16-BIT TIMER1 HARDWARE
+ *
+ * (C) COPYRIGHT 2015 - CHRISTOPH KLIE
+ *======================================================================*/
+
+#include "TIMER1_DRIVER.h"
+
+/*
+ * INTERRUPT FUNCTIONS WITH FUNCTION POINTERS FOR MODULARITY
+ */
+void (*__TIMER1_DRIVER_INTERRUPT_COMPA_FUNC)(void) = __TIMER1_DRIVER_VEC_DUMMY;
+void (*__TIMER1_DRIVER_INTERRUPT_COMPB_FUNC)(void) = __TIMER1_DRIVER_VEC_DUMMY;
+void (*__TIMER1_DRIVER_INTERRUPT_OVF_FUNC)(void) = __TIMER1_DRIVER_VEC_DUMMY;
+void (*__TIMER1_DRIVER_INTERRUPT_IC_FUNC)(void) = __TIMER1_DRIVER_VEC_DUMMY;
+
+void __TIMER1_DRIVER_COMPA_VECTOR (void)
+{
+    __TIMER1_DRIVER_INTERRUPT_COMPA_FUNC();
+}
+
+void __TIMER1_DRIVER_COMPB_VECTOR (void)
+{
+    __TIMER1_DRIVER_INTERRUPT_COMPB_FUNC();
+}
+
+void __TIMER1_DRIVER_OVF_VECTOR (void)
+{
+    __TIMER1_DRIVER_INTERRUPT_OVF_FUNC();
+}
+
+void __TIMER1_DRIVER_IC_VECTOR (void)
+{
+    __TIMER1_DRIVER_INTERRUPT_IC_FUNC();
+}
+
+void __TIMER1_DRIVER_VEC_DUMMY(void)
+{
+    __asm__("nop");
+}

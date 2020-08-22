@@ -1,0 +1,204 @@
+/*======================================================================*
+ * PROJECT:         MF-DECODER
+ * MODUL:           DCC-PROTOCOL
+ * DEVELOPED BY:    Christoph Klie
+ * FILENAME:        dcc_protocol.c
+ *
+ * DESCRIPTION:
+ *      DCC-PROTOCOL SOURCE FILE
+ *      THIS MODULE READS, FILTERS AND CONVERTS DCC DATA FRAMES FOR THE
+ *      USER.
+ *
+ * (C) COPYRIGHT 2015 - CHRISTOPH KLIE
+ *======================================================================*/
+
+#include "dcc_protocol.h"
+
+/*
+ * BASIS DCC PHYSICAL SETTINGS
+ */
+#define DCC_LOW_BIT_LENGTH          232L
+#define DCC_HIGH_BIT_LENGTH         116L
+#define DCC_BIT_SAMPLE_INTERVALL    ((DCC_AVR_SPEED / 1000000) * ((DCC_HIGH_BIT_LENGTH * 3) / 4))
+
+/*
+ * DATATYPE FOR DCC PURPOSES
+ */
+struct DCC_t
+{
+    volatile unsigned char BITCOUNT;
+    volatile unsigned char BYTECOUNT;
+    volatile unsigned char TMPBYTE;
+    volatile unsigned char MESSAGE[4];
+    volatile unsigned char MESSAGESIZE;
+}
+DCC;
+
+/*
+ * INTERRUPT FUNCTION PROTOTYPES
+ */
+static void DCC_INTERRUPT_BIT_DETECTION(void);
+static void DCC_INTERRUPT_BIT_SAMPLE_PREAMBLE(void);
+static void DCC_INTERRUPT_BIT_SAMPLE_LEAD0(void);
+static void DCC_INTERRUPT_BIT_SAMPLE_DATA(void);
+static void DCC_INTERRUPT_BIT_SAMPLE_DIVIDER(void);
+
+/*
+ * INITIALIZE THE DCC INTERFACE AND START DETECTION
+ */
+void DCC_INITIALIZE(void)
+{
+    DCC.BITCOUNT = 0;
+    DCC.BYTECOUNT = 0;
+    DCC.TMPBYTE = 0x00;
+    DCC.MESSAGESIZE = 0;
+
+    __IO_DRIVER_INTERRUPT_INT0_SENSE_RISING();
+    __IO_DRIVER_INTERRUPT_INT0_SETFUNC(DCC_INTERRUPT_BIT_DETECTION);
+    __IO_DRIVER_INTERRUPT_INT0_ENABLE();
+
+    __TIMER1_DRIVER_MODE_NORMAL();
+    __TIMER1_DRIVER_INTERRUPT_COMPA_SETFUNC(DCC_INTERRUPT_BIT_SAMPLE_PREAMBLE);
+    __TIMER1_DRIVER_INTERRUPT_COMPA_ENABLE((unsigned short)DCC_BIT_SAMPLE_INTERVALL);
+    __TIMER1_DRIVER_CLOCK_OFF();
+}
+
+/*
+ * DISABLE DCC INTERFACE
+ */
+void DCC_DEINITIALIZE(void)
+{
+    __TIMER1_DRIVER_CLOCK_OFF();
+    __IO_DRIVER_INTERRUPT_INT0_DISABLE();
+    __TIMER1_DRIVER_INTERRUPT_COMPA_DISABLE();
+    DCC.MESSAGESIZE = 0x00;
+}
+
+/*
+ * CHECK FOR NEW DCC MESSAGE AND FILTER WRONG FORMAT AND CHECKSUM
+ */
+unsigned char DCC_FETCH(unsigned short *DCC_DATA_FRAME)
+{
+    if(DCC.MESSAGESIZE == 0)
+    {
+        return 0;
+    }
+
+    if((DCC.MESSAGE[0] ^ DCC.MESSAGE[1] ^ DCC.MESSAGE[2]) != 0x00)
+    {
+        DCC.MESSAGESIZE = 0;
+        return 0;
+    }
+
+    if(((DCC.MESSAGE[0] & 0xC0) == 0x80) && ((DCC.MESSAGE[1] & 0x80) == 0x80))
+    {
+        *DCC_DATA_FRAME = (unsigned short)((DCC.MESSAGE[1] & 0xE0) ^ 0xE0);
+        *DCC_DATA_FRAME <<= 2;
+        *DCC_DATA_FRAME |= (unsigned short)(DCC.MESSAGE[0] & 0x3F);
+        *DCC_DATA_FRAME <<= 3;
+        *DCC_DATA_FRAME |= (unsigned short)(DCC.MESSAGE[1] & 0x07);
+
+        DCC.MESSAGESIZE = 0;
+        return 1;
+    }
+
+    DCC.MESSAGESIZE = 0;
+    return 0;
+}
+
+/*
+ * INTERRUPT FUNCTION FOR NEW BIT EDGE DETECTION
+ */
+static void DCC_INTERRUPT_BIT_DETECTION(void)
+{
+    __TIMER1_DRIVER_TCNT = 0x0000;
+    __TIMER1_DRIVER_CLOCK_DIV1();
+}
+
+/*
+ * INTERRUPT FOR SAMPLING A PREAMBLE BIT (MINIMUM 10 IN A ROW)
+ */
+static void DCC_INTERRUPT_BIT_SAMPLE_PREAMBLE(void)
+{
+    __TIMER1_DRIVER_CLOCK_OFF();
+    DCC.BITCOUNT++;
+
+    if(!(__IO_DRIVER_INTERRUPT_INT0_LEVEL()))
+    {
+        if((DCC.BITCOUNT >= 10) && (DCC.MESSAGESIZE == 0))
+        {
+            __TIMER1_DRIVER_INTERRUPT_COMPA_SETFUNC(DCC_INTERRUPT_BIT_SAMPLE_LEAD0);
+            DCC.BITCOUNT = 0;
+            DCC.BYTECOUNT = 0;
+            DCC.TMPBYTE = 0x00;
+        }
+    }
+
+    else
+    {
+        DCC.BITCOUNT = 0;
+    }
+}
+
+/*
+ * INTERRUPT FOR SAMPLING A LEAD0 BIT (BIT BETWEEN PREAMBLE AND DATA)
+ */
+static void DCC_INTERRUPT_BIT_SAMPLE_LEAD0(void)
+{
+    __TIMER1_DRIVER_CLOCK_OFF();
+
+    if(__IO_DRIVER_INTERRUPT_INT0_LEVEL())
+    {
+        __TIMER1_DRIVER_INTERRUPT_COMPA_SETFUNC(DCC_INTERRUPT_BIT_SAMPLE_DATA);
+    }
+}
+
+/*
+ * INTERRUPT FOR SAMPLING A DATA BIT (EXACTLY 8 IN A ROW)
+ */
+static void DCC_INTERRUPT_BIT_SAMPLE_DATA(void)
+{
+    __TIMER1_DRIVER_CLOCK_OFF();
+    DCC.BITCOUNT++;
+    DCC.TMPBYTE <<= 1;
+
+    if(!(__IO_DRIVER_INTERRUPT_INT0_LEVEL()))
+    {
+        DCC.TMPBYTE |= 0x01;
+    }
+
+    if(DCC.BITCOUNT == 8)
+    {
+        DCC.MESSAGE[DCC.BYTECOUNT++] = DCC.TMPBYTE;
+        DCC.TMPBYTE = 0x00;
+        DCC.BITCOUNT = 0;
+        __TIMER1_DRIVER_INTERRUPT_COMPA_SETFUNC(DCC_INTERRUPT_BIT_SAMPLE_DIVIDER);
+    }
+}
+
+/*
+ * INTERRUPT FOR SAMPLING A DEVIDER BIT BETWEEN TWO DATA BYTES
+ * WHEN BIT = 0 -> DEVIDER, ANOTHER DATA BYTE INCOMING
+ * WHEN BIT = 1 -> END OF MESSAGE
+ */
+static void DCC_INTERRUPT_BIT_SAMPLE_DIVIDER(void)
+{
+    __TIMER1_DRIVER_CLOCK_OFF();
+
+    if((__IO_DRIVER_INTERRUPT_INT0_LEVEL()) && (DCC.BYTECOUNT < 3))
+    {
+        __TIMER1_DRIVER_INTERRUPT_COMPA_SETFUNC(DCC_INTERRUPT_BIT_SAMPLE_DATA);
+    }
+
+    else if((!(__IO_DRIVER_INTERRUPT_INT0_LEVEL())) && (DCC.BYTECOUNT == 3))
+    {
+        DCC.MESSAGESIZE = DCC.BYTECOUNT;
+        __TIMER1_DRIVER_INTERRUPT_COMPA_SETFUNC(DCC_INTERRUPT_BIT_SAMPLE_PREAMBLE);
+    }
+
+    else
+    {
+        DCC.MESSAGESIZE = 0;
+        __TIMER1_DRIVER_INTERRUPT_COMPA_SETFUNC(DCC_INTERRUPT_BIT_SAMPLE_PREAMBLE);
+    }
+}

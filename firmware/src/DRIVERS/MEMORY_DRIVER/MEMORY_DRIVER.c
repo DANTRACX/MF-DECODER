@@ -1,0 +1,63 @@
+/*======================================================================*
+ * PROJECT:         MF-DECODER
+ * MODUL:           DRIVER
+ * DEVELOPED BY:    Christoph Klie
+ * FILENAME:        MEMORY_DRIVER.c
+ *
+ * DESCRIPTION:
+ *      THIS MODULE REPRESENTS A DRIVER FOR MEMORY FUNCTIONALITY
+ *      ESPECIALLY EEPROM AND FAST MEMORY REGISTERS
+ *
+ * (C) COPYRIGHT 2015 - CHRISTOPH KLIE
+ *======================================================================*/
+
+#include "MEMORY_DRIVER.h"
+
+/*
+ * WAIT FOR EEPROM READY
+ */
+void __MEMORY_DRIVER_EEMEM_WAIT()
+{
+    while(__MEMORY_DRIVER_EEMEM_EECR & (1 << __MEMORY_DRIVER_EEMEM_EEPE));
+}
+
+/*
+ * WRITE DATA TO EEPROM AT SPECIFIC ADDRESS
+ */
+void __MEMORY_DRIVER_EEMEM_WRITE(unsigned short EEMEM_ADDR, unsigned char EEMEM_DATA)
+{
+    if(EEMEM_ADDR < __MEMORY_DRIVER_EEMEM_SIZE)
+    {
+        while(__MEMORY_DRIVER_EEMEM_EECR & (1 << __MEMORY_DRIVER_EEMEM_EEPE));
+
+        __MEMORY_DRIVER_SREG_CLEAR();
+        __MEMORY_DRIVER_EEMEM_MODE_ATOMIC();
+        __MEMORY_DRIVER_EEMEM_EEAR  = EEMEM_ADDR;
+        __MEMORY_DRIVER_EEMEM_EEDR  = EEMEM_DATA;
+        __MEMORY_DRIVER_EEMEM_EECR |= (1 << __MEMORY_DRIVER_EEMEM_EEMPE);
+        __MEMORY_DRIVER_EEMEM_EECR |= (1 << __MEMORY_DRIVER_EEMEM_EEPE);
+
+        while(__MEMORY_DRIVER_EEMEM_EECR & (1 << __MEMORY_DRIVER_EEMEM_EEPE));
+        __MEMORY_DRIVER_SREG_SET();
+    }
+}
+
+/*
+ * READ DATA FROM SPECIFIC EEPROM ADRESS
+ */
+unsigned char __MEMORY_DRIVER_EEMEM_READ(unsigned short EEMEM_ADDR)
+{
+    if(EEMEM_ADDR < __MEMORY_DRIVER_EEMEM_SIZE)
+    {
+        while(__MEMORY_DRIVER_EEMEM_EECR & (1 << __MEMORY_DRIVER_EEMEM_EEPE));
+
+        __MEMORY_DRIVER_SREG_CLEAR();
+        __MEMORY_DRIVER_EEMEM_EEAR  = EEMEM_ADDR;
+        __MEMORY_DRIVER_EEMEM_EECR |= (1 << __MEMORY_DRIVER_EEMEM_EERE);
+        __MEMORY_DRIVER_SREG_SET();
+
+        return __MEMORY_DRIVER_EEMEM_EEDR;
+    }
+
+    return 0;
+}
